@@ -1339,6 +1339,15 @@ void DRMConnector::Perform(DRMOps code, drmModeAtomicReq *req, va_list args) {
       DRM_LOGD("Connector %d: Setting Qsync mode %d", obj_id, qsync_mode);
     } break;
 
+    case DRMOps::CONNECTOR_SET_OPLUS_ADFR_MIN_FPS: {
+      if (!prop_mgr_.IsPropertyAvailable(DRMProperty::OPLUS_ADFR_MIN_FPS)) {
+        return;
+      }
+      uint32_t request = va_arg(args, uint32_t);
+      drmModeAtomicAddProperty(req, obj_id,
+                               prop_mgr_.GetPropertyId(DRMProperty::OPLUS_ADFR_MIN_FPS), request);
+    } break;
+
     case DRMOps::CONNECTOR_SET_AVR_STEP_STATE: {
       if (!prop_mgr_.IsPropertyAvailable(DRMProperty::AVR_STEP_STATE)) {
         return;

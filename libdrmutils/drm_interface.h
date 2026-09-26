@@ -715,6 +715,14 @@ enum struct DRMOps {
    *      PrivacyRegions - Consolidated privacy regions
    */
   CONNECTOR_SET_PRIVACY_REGIONS,
+
+  /*
+   * Op: Sets the encoded Oplus ADFR request on the connector.
+   * Arg: uint32_t - Connector ID
+   *      uint32_t - ADFR request (not the generic QSync mode)
+   * Keep device extensions at the end to preserve existing operation values.
+   */
+  CONNECTOR_SET_OPLUS_ADFR_MIN_FPS,
 };
 
 enum struct DRMRotation {

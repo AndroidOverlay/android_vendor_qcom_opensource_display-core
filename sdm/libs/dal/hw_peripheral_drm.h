@@ -103,6 +103,7 @@ class HWPeripheralDRM : public HWDeviceDRM, public PanelFeaturePropertyIntf {
   void CacheDestScalarData();
   void SetSelfRefreshState();
   void SetVMReqState();
+  void SetOplusAdfrMinFps();
   void ResetPropertyCache();
   void InitAIScaler();
   bool IsCACEnabled(const HWLayersInfo *hw_layers_info);
