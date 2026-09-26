@@ -45,6 +45,10 @@ IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "hw_peripheral_drm.h"
 
+#ifdef OPLUS_ADFR
+#include <oplus/display/AdfrPolicy.h>
+#endif
+
 #define __CLASS__ "HWPeripheralDRM"
 
 using sde_drm::DRMDisplayType;
@@ -364,6 +368,27 @@ DisplayError HWPeripheralDRM::ConfigureLoopbackCAC(bool cac_enabled) {
   return kErrorNone;
 }
 
+void HWPeripheralDRM::SetOplusAdfrMinFps() {
+#ifdef OPLUS_ADFR
+  if (!hw_panel_info_.is_primary_panel) {
+    return;
+  }
+
+  uint32_t refresh_rate = vrefresh_ ? vrefresh_ :
+      connector_info_.modes[current_mode_index_].mode.vrefresh;
+  DRMPowerMode power_mode = last_power_mode_;
+  if (first_cycle_) {
+    power_mode = DRMPowerMode::ON;
+  } else if (pending_power_state_ != kPowerStateNone) {
+    GetDRMPowerMode(pending_power_state_, &power_mode);
+  }
+  auto request = oplus::display::GetAdfrMinFpsRequest(refresh_rate, power_mode == DRMPowerMode::ON);
+  if (request) {
+    drm_atomic_intf_->Perform(DRMOps::CONNECTOR_SET_OPLUS_ADFR_MIN_FPS, token_.conn_id, *request);
+  }
+#endif
+}
+
 DisplayError HWPeripheralDRM::Commit(HWLayersInfo *hw_layers_info) {
   SetDestScalarData(*hw_layers_info);
 
@@ -402,6 +427,7 @@ DisplayError HWPeripheralDRM::Commit(HWLayersInfo *hw_layers_info) {
   drm_atomic_intf_->Perform(DRMOps::CONNECTOR_SET_USECASE_IDX, token_.conn_id,
                             hw_layers_info->common_info->flags.only_video_updating);
 
+  SetOplusAdfrMinFps();
   error = HWDeviceDRM::Commit(hw_layers_info);
   shared_ptr<Fence> cwb_fence = Fence::Create(INT(cwb_fence_fd), "cwb_fence");
   if (error != kErrorNone) {
