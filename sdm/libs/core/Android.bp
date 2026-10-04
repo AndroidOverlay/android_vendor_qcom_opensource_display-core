@@ -13,7 +13,10 @@ cc_library_shared {
         "-fno-operator-names",
         "-Wno-unused-parameter",
         "-DLOG_TAG=\"SDM\"",
-    ],
+    ] + select(soong_config_variable("qtidisplay", "oplus_adfr"), {
+        true: ["-DOPLUS_ADFR"],
+        default: [],
+    }),
     shared_libs: [
         "libdl",
         "libdisplaydebug",
@@ -23,7 +26,10 @@ cc_library_shared {
         "libsdedrm",
         "libsdmdal",
         "libtinyxml2",
-    ],
+    ] + select(soong_config_variable("qtidisplay", "oplus_adfr"), {
+        true: ["//hardware/oplus:liboplus_adfr"],
+        default: [],
+    }),
 
     srcs: [
         "core_interface.cpp",

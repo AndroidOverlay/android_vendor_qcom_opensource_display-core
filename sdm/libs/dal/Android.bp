@@ -13,10 +13,6 @@ cc_library_shared {
         true: ["-DOPLUS_ADFR"],
         default: [],
     }),
-    static_libs: select(soong_config_variable("qtidisplay", "oplus_adfr"), {
-        true: ["//hardware/oplus:liboplus_adfr"],
-        default: [],
-    }),
     shared_libs: [
         "libdisplaydebug",
         "libsdmutils",
@@ -24,7 +20,7 @@ cc_library_shared {
         "libdrmutils",
         "libsdedrm",
     ] + select(soong_config_variable("qtidisplay", "oplus_adfr"), {
-        true: ["libbase"],
+        true: ["//hardware/oplus:liboplus_adfr"],
         default: [],
     }),
 

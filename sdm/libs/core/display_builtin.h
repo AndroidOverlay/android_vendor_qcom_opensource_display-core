@@ -51,8 +51,13 @@
 #include <private/vm_file_xfer_fact_intf_extn.h>
 #include <sys/stat.h>
 #include <sys/time.h>
+#include <atomic>
 #include <string>
 #include <vector>
+
+#ifdef OPLUS_ADFR
+#include <oplus/display/AdfrPolicy.h>
+#endif
 
 #include "display_base.h"
 #include "drm_interface.h"
@@ -404,6 +409,13 @@ class DisplayBuiltIn : public DisplayBase,
   bool dpps_pu_nofiy_pending_ = false;
   enum class SamplingState { Off, On } samplingState = SamplingState::Off;
   DisplayError setColorSamplingState(SamplingState state);
+  DisplayError SetColorSamplingStateLocked(SamplingState state);
+  std::atomic<bool> client_sampling_ = false;
+#ifdef OPLUS_ADFR
+  void UpdateOplusAdfrSampling();
+  oplus::display::AdfrPolicy *oplus_adfr_ = nullptr;
+  bool oplus_adfr_sampling_ = false;
+#endif
 
   bool histogramSetup = false;
   sde_drm::DppsFeaturePayload histogramCtrl;
