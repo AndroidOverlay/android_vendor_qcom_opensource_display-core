@@ -1684,12 +1684,6 @@ DisplayError DisplayBuiltIn::CommitLocked(LayerStack *layer_stack) {
 DisplayError DisplayBuiltIn::PostCommit() {
   DisplayError err = kErrorNone;
   DisplayBase::PostCommit();
-#ifdef OPLUS_ADFR
-  // The minimum refresh request is held for a few frames after a mode change.
-  if (oplus_adfr_ && oplus_adfr_->ModeChangePending()) {
-    event_handler_->Refresh();
-  }
-#endif
   // Mutex scope
   {
     lock_guard<recursive_mutex> obj(brightness_lock_);
