@@ -53,6 +53,11 @@
 #include "drm_interface.h"
 #include "drm_master.h"
 
+#ifdef OPLUS_ADFR
+#include <display/drm/msm_drm_pp.h>
+#include <xf86drmMode.h>
+#endif
+
 #define __CLASS__ "DisplayBuiltIn"
 
 namespace sdm {
@@ -299,6 +304,18 @@ DisplayError DisplayBuiltIn::Init() {
   if (value == 1) {
     initColorSamplingState();
   }
+
+#ifdef OPLUS_ADFR
+  if (client_ctx_.hw_panel_info.is_primary_panel) {
+    oplus_adfr_ = oplus::display::AdfrPolicy::Get();
+    if (oplus_adfr_) {
+      oplus_adfr_->SetPanelName(client_ctx_.hw_panel_info.panel_name);
+      if (!histogramSetup) {
+        DLOGW("ADFR gray level detection needs the histogram interrupt");
+      }
+    }
+  }
+#endif
 
   value = 0;
   Debug::Get()->GetProperty(DEFER_FPS_FRAME_COUNT, &value);
@@ -556,6 +573,9 @@ DisplayError DisplayBuiltIn::Deinit() {
 
 DisplayError DisplayBuiltIn::PrePrepare(LayerStack *layer_stack) {
   DTRACE_SCOPED();
+#ifdef OPLUS_ADFR
+  UpdateOplusAdfrSampling();
+#endif
   uint32_t new_mixer_width = 0;
   uint32_t new_mixer_height = 0;
   uint32_t display_width = client_ctx_.display_attributes.x_pixels;
@@ -802,31 +822,37 @@ void DisplayBuiltIn::initColorSamplingState() {
 }
 
 DisplayError DisplayBuiltIn::setColorSamplingState(SamplingState state) {
+  ClientLock lock(disp_mutex_);
+  return SetColorSamplingStateLocked(state);
+}
+
+DisplayError DisplayBuiltIn::SetColorSamplingStateLocked(SamplingState state) {
   samplingState = state;
   if (samplingState == SamplingState::On) {
     histogramCtrl.value = sde_drm::HistModes::kHistEnabled;
     histogramIRQ.value = sde_drm::HistModes::kHistEnabled;
     if (client_ctx_.hw_panel_info.mode == kModeCommand) {
       uint32_t pending;
-      ControlPartialUpdate(false /* enable */, &pending);
+      ControlPartialUpdateLocked(false /* enable */, &pending);
     }
   } else {
     histogramCtrl.value = sde_drm::HistModes::kHistDisabled;
     histogramIRQ.value = sde_drm::HistModes::kHistDisabled;
     if (client_ctx_.hw_panel_info.mode == kModeCommand) {
       uint32_t pending;
-      ControlPartialUpdate(true /* enable */, &pending);
+      ControlPartialUpdateLocked(true /* enable */, &pending);
     }
   }
 
   // effectively drmModeAtomicAddProperty for the SDE_DSPP_HIST_CTRL_V1
-  return DppsProcessOps(kDppsSetFeature, &histogramCtrl, sizeof(histogramCtrl));
+  return SetDppsFeatureLocked(&histogramCtrl, sizeof(histogramCtrl));
 }
 
 DisplayError DisplayBuiltIn::colorSamplingOn() {
   if (!histogramSetup) {
     return kErrorParameters;
   }
+  client_sampling_ = true;
   return setColorSamplingState(SamplingState::On);
 }
 
@@ -834,8 +860,35 @@ DisplayError DisplayBuiltIn::colorSamplingOff() {
   if (!histogramSetup) {
     return kErrorParameters;
   }
+  client_sampling_ = false;
+#ifdef OPLUS_ADFR
+  ClientLock lock(disp_mutex_);
+  if (oplus_adfr_sampling_) {
+    return kErrorNone;
+  }
+  return SetColorSamplingStateLocked(SamplingState::Off);
+#else
   return setColorSamplingState(SamplingState::Off);
+#endif
 }
+
+#ifdef OPLUS_ADFR
+// The ADFR policy needs the frame histogram only at low panel luminance.
+void DisplayBuiltIn::UpdateOplusAdfrSampling() {
+  if (!oplus_adfr_ || !histogramSetup) {
+    return;
+  }
+
+  bool sampling = oplus_adfr_->NeedsHistogram();
+  if (sampling == oplus_adfr_sampling_) {
+    return;
+  }
+  oplus_adfr_sampling_ = sampling;
+  if (!client_sampling_) {
+    SetColorSamplingStateLocked(sampling ? SamplingState::On : SamplingState::Off);
+  }
+}
+#endif
 
 DisplayError DisplayBuiltIn::SetupSPR() {
   int spr_prop_value = 0;
@@ -1631,6 +1684,12 @@ DisplayError DisplayBuiltIn::CommitLocked(LayerStack *layer_stack) {
 DisplayError DisplayBuiltIn::PostCommit() {
   DisplayError err = kErrorNone;
   DisplayBase::PostCommit();
+#ifdef OPLUS_ADFR
+  // The minimum refresh request is held for a few frames after a mode change.
+  if (oplus_adfr_ && oplus_adfr_->ModeChangePending()) {
+    event_handler_->Refresh();
+  }
+#endif
   // Mutex scope
   {
     lock_guard<recursive_mutex> obj(brightness_lock_);
@@ -1934,6 +1993,11 @@ DisplayError DisplayBuiltIn::SetPanelBrightness(float brightness, bool apply_imm
       level_remainder_ = level_remainder;
       pending_brightness_ = false;
       comp_manager_->SetBacklightLevel(display_comp_ctx_, level);
+#ifdef OPLUS_ADFR
+      if (oplus_adfr_ && oplus_adfr_->SetBacklight(UINT32(level))) {
+        event_handler_->Refresh();
+      }
+#endif
       DLOGI_IF(kTagDisplay, "Setting brightness to level %d (%f percent)", level, brightness * 100);
     } else if (err == kErrorDeferred) {
       // TODO(user): I8508d64a55c3b30239c6ed2886df391407d22f25 causes mismatch between perceived
@@ -2167,6 +2231,21 @@ void DisplayBuiltIn::HwRecovery(const HWRecoveryEvent sdm_event_code) {
 }
 
 void DisplayBuiltIn::Histogram(int histogram_fd, uint32_t blob_id) {
+#ifdef OPLUS_ADFR
+  if (oplus_adfr_) {
+    drmModePropertyBlobPtr blob = drmModeGetPropertyBlob(histogram_fd, blob_id);
+    if (blob && blob->data && blob->length >= sizeof(drm_msm_hist)) {
+      auto hist = static_cast<const drm_msm_hist *>(blob->data);
+      if (oplus_adfr_->OnHistogram(hist->data, HIST_V_SIZE)) {
+        event_handler_->Refresh();
+      }
+    }
+    drmModeFreePropertyBlob(blob);
+    if (!client_sampling_) {
+      return;
+    }
+  }
+#endif
   event_handler_->HistogramEvent(histogram_fd, blob_id);
 }
 
